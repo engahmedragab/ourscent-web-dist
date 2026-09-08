@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+
+  <!-- Home -->
+  <url>
+    <loc>https://ourscent.com/</loc>
+    <xhtml:link rel="alternate" hreflang="ar" href="https://ourscent.com/"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ourscent.com/en"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ourscent.com/fr"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ourscent.com/"/>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- Browse -->
+  <url>
+    <loc>https://ourscent.com/browse</loc>
+    <xhtml:link rel="alternate" hreflang="ar" href="https://ourscent.com/browse"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ourscent.com/en/browse"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ourscent.com/fr/browse"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ourscent.com/browse"/>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+
+  <!-- Trending -->
+  <url>
+    <loc>https://ourscent.com/trending</loc>
+    <xhtml:link rel="alternate" hreflang="ar" href="https://ourscent.com/trending"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ourscent.com/en/trending"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ourscent.com/fr/trending"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ourscent.com/trending"/>
+    <changefreq>daily</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <!-- Brands -->
+  <url>
+    <loc>https://ourscent.com/brands</loc>
+    <xhtml:link rel="alternate" hreflang="ar" href="https://ourscent.com/brands"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ourscent.com/en/brands"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ourscent.com/fr/brands"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ourscent.com/brands"/>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+
+  <!-- Notes Encyclopedia -->
+  <url>
+    <loc>https://ourscent.com/notes</loc>
+    <xhtml:link rel="alternate" hreflang="ar" href="https://ourscent.com/notes"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ourscent.com/en/notes"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ourscent.com/fr/notes"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ourscent.com/notes"/>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+
+  <!-- Influencers -->
+  <url>
+    <loc>https://ourscent.com/influencers</loc>
+    <xhtml:link rel="alternate" hreflang="ar" href="https://ourscent.com/influencers"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ourscent.com/en/influencers"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ourscent.com/fr/influencers"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ourscent.com/influencers"/>
+    <changefreq>weekly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <!-- Discover by Accords -->
+  <url>
+    <loc>https://ourscent.com/discover/accords</loc>
+    <xhtml:link rel="alternate" hreflang="ar" href="https://ourscent.com/discover/accords"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ourscent.com/en/discover/accords"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ourscent.com/fr/discover/accords"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ourscent.com/discover/accords"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <!-- Discover by Notes -->
+  <url>
+    <loc>https://ourscent.com/discover/notes</loc>
+    <xhtml:link rel="alternate" hreflang="ar" href="https://ourscent.com/discover/notes"/>
+    <xhtml:link rel="alternate" hreflang="en" href="https://ourscent.com/en/discover/notes"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ourscent.com/fr/discover/notes"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ourscent.com/discover/notes"/>
+    <changefreq>monthly</changefreq>
+    <priority>0.6</priority>
+  </url>
+
+  <!-- Dynamic pages (fragrances, brands, notes, perfumers, influencers)       -->
+  <!-- are covered by the backend-generated sitemap-index.xml referenced below -->
+
+</urlset>

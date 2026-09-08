@@ -1,0 +1,68 @@
+{
+  "name": "OurScent — عطرنا",
+  "short_name": "OurScent",
+  "description": "منصة اكتشاف العطور العربية والعالمية — اكتشف، قيّم، قارن العطور",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#171717",
+  "lang": "ar",
+  "dir": "rtl",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/apple-touch-icon.png",
+      "type": "image/png",
+      "sizes": "180x180",
+      "purpose": "any"
+    }
+  ],
+  "categories": [
+    "lifestyle",
+    "shopping",
+    "food"
+  ],
+  "related_applications": [],
+  "prefer_related_applications": false,
+  "shortcuts": [
+    {
+      "name": "Browse Fragrances",
+      "short_name": "Browse",
+      "url": "/browse",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "any"
+        }
+      ]
+    },
+    {
+      "name": "Trending",
+      "short_name": "Trending",
+      "url": "/trending",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "any"
+        }
+      ]
+    },
+    {
+      "name": "My Wardrobe",
+      "short_name": "Wardrobe",
+      "url": "/wardrobe",
+      "icons": [
+        {
+          "src": "/favicon.svg",
+          "sizes": "any"
+        }
+      ]
+    }
+  ]
+}

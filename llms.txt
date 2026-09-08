@@ -1,0 +1,65 @@
+# OurScent — عطرنا
+
+> OurScent (عطرنا) is an Arabic-first fragrance discovery and community platform. It covers thousands of Western, Arab, niche, and designer fragrances with community ratings, note pyramids, accord profiles, price comparisons, and cultural context for Arab perfume traditions. Available in Arabic, English, and French.
+
+## About
+- Website: https://ourscent.com
+- Primary audience: Arabic-speaking fragrance enthusiasts and perfume collectors worldwide
+- Languages: Arabic (default, no URL prefix), English (/en/), French (/fr/)
+- Contact: hello@ourscent.com
+
+## Key pages
+
+- [Home](https://ourscent.com/): Landing page with trending fragrances and search
+- [Browse Fragrances](https://ourscent.com/browse): Search and filter thousands of fragrances by brand, family, notes, accords, gender, concentration, occasion, longevity, sillage, launch year, halal status, oud grade, alcohol-free, and more
+- [Trending](https://ourscent.com/trending): Top-ranked fragrances by community popularity score
+- [Brands](https://ourscent.com/brands): Directory of fragrance brands — Arab, French, niche, and designer
+- [Fragrance Notes](https://ourscent.com/notes): Encyclopedia of fragrance notes grouped by category (citrus, floral, woody, oriental, oud, musk, resins, gourmand, etc.)
+- [Accord Search](https://ourscent.com/discover/accords): Find fragrances by selecting accord profiles
+- [Note Search](https://ourscent.com/discover/notes): Find fragrances by selecting specific notes
+- [Influencers](https://ourscent.com/influencers): Arab fragrance reviewers and influencers with community accuracy and budget-variety ratings
+- [Compare](https://ourscent.com/compare): Side-by-side comparison of up to 3 fragrances across all attributes
+- [My Wardrobe](https://ourscent.com/wardrobe): Personal fragrance collection manager (owned, wishlist, gifted, samples) — requires login
+- [My Notebook](https://ourscent.com/notebook): Personal fragrance notes and review companion — requires login
+
+## Content structure
+
+Each fragrance page (https://ourscent.com/fragrance/{slug}) contains:
+- Bilingual name (Arabic + English + French)
+- Brand, concentration type (EDP/EDT/Parfum/etc.), gender, launch year
+- Perfumer credit(s)
+- Community overall rating (1–5), longevity score, sillage score, total votes
+- Note pyramid (top / heart / base notes)
+- Accord profile with percentage breakdown
+- Official description in Arabic and English
+- Price comparison across retailers with affiliate links and stock status
+- Arab cultural context: oud origin and grade, halal status, mukhallat classification, bakhoor type, occasion tags (Ramadan, Eid, wedding, prayer, hospitality), gifting index, climate suitability
+- Similar fragrance recommendations, cheaper alternatives (dupes), layering pairs
+- Community vote distribution charts
+
+Each brand page (https://ourscent.com/brand/{slug}) contains:
+- Brand name (Arabic + English), country of origin, founding year, brand type (Arab/French/Designer/Niche)
+- Full filterable fragrance catalog for that brand
+
+Each fragrance note page (https://ourscent.com/note/{slug}) contains:
+- Note description and category
+- All fragrances that feature that note
+
+Each influencer page (https://ourscent.com/influencer/{slug}) contains:
+- Influencer bio, social handles (Instagram, TikTok, YouTube, Snapchat)
+- Community accuracy rating, budget-variety score, authenticity rating
+- Review history with linked fragrances
+
+Each perfumer page (https://ourscent.com/perfumer/{slug}) contains:
+- Perfumer biography and nationality
+- All fragrances created by that perfumer
+
+## Data notes for AI agents
+- All fragrance slugs are URL-safe English identifiers (e.g., `oud-wood-tom-ford`)
+- Brand slugs follow the same pattern (e.g., `tom-ford`, `amouage`)
+- Community ratings are on a 1–5 scale
+- Longevity and sillage are on a 1–5 scale
+- Accord percentages indicate the dominance of each accord in community perception
+- The platform has a specific focus on Arab fragrance culture: oud, bakhoor, mukhallat, attar, halal certification
+- Structured data (schema.org) is present on all fragrance, brand, and note pages
+- Sitemaps: https://ourscent.com/sitemap.xml (static) + https://ourscent.com/sitemap-index.xml (dynamic, served by API)

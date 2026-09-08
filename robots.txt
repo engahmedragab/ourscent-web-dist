@@ -1,0 +1,79 @@
+# OurScent — robots.txt
+# https://ourscent.com
+
+# ── General crawlers ────────────────────────────────────────────────────────
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /wardrobe
+Disallow: /notebook
+Disallow: /admin
+Disallow: /en/wardrobe
+Disallow: /en/notebook
+Disallow: /ar/wardrobe
+Disallow: /ar/notebook
+Disallow: /fr/wardrobe
+Disallow: /fr/notebook
+Disallow: /login
+
+# ── Google ───────────────────────────────────────────────────────────────────
+User-agent: Googlebot
+Allow: /
+Crawl-delay: 1
+
+# Google AI (Bard / Gemini training data — allow for AI visibility)
+User-agent: Google-Extended
+Allow: /
+
+# ── Bing ─────────────────────────────────────────────────────────────────────
+User-agent: Bingbot
+Allow: /
+Crawl-delay: 1
+
+# ── OpenAI / ChatGPT ─────────────────────────────────────────────────────────
+User-agent: GPTBot
+Allow: /
+Disallow: /api/
+Disallow: /wardrobe
+Disallow: /notebook
+
+# ChatGPT plugin / browsing agent
+User-agent: ChatGPT-User
+Allow: /
+
+# ── Anthropic / Claude ───────────────────────────────────────────────────────
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+# ── Perplexity ────────────────────────────────────────────────────────────────
+User-agent: PerplexityBot
+Allow: /
+
+# ── Common Crawl (used by many AI training pipelines) ─────────────────────────
+User-agent: CCBot
+Allow: /
+
+# ── Meta / Facebook ──────────────────────────────────────────────────────────
+User-agent: FacebookBot
+Allow: /
+
+# ── Apple ────────────────────────────────────────────────────────────────────
+User-agent: Applebot
+Allow: /
+
+# ── AI search agents ─────────────────────────────────────────────────────────
+User-agent: Omgilibot
+Allow: /
+
+User-agent: YouBot
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+# ── Sitemaps ─────────────────────────────────────────────────────────────────
+Sitemap: https://ourscent.com/sitemap.xml
+Sitemap: https://ourscent.com/sitemap-index.xml
