@@ -1,0 +1,1 @@
+import{a as e,n as t}from"./jsx-runtime-OQpaS_Dv.js";import{t as n}from"./useTranslation-D3cieaht.js";var r=e(t(),1);function i(){let{i18n:e}=n(),t=e.language===`ar`;return(0,r.useEffect)(()=>{document.documentElement.setAttribute(`dir`,t?`rtl`:`ltr`),document.documentElement.setAttribute(`lang`,e.language)},[e.language,t]),{isRtl:t,lang:e.language}}export{i as t};

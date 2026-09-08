@@ -1,1 +1,0 @@
-import{t as e}from"./scentApiClient-D3Y_Mtwb.js";var t={list:()=>e.get(`/scent/brands`).then(e=>e.data),getBySlug:t=>e.get(`/scent/brands/${t}`).then(e=>e.data),getFragrances:(t,n)=>e.get(`/scent/brands/${t}/fragrances`,{params:n}).then(e=>e.data)};export{t};

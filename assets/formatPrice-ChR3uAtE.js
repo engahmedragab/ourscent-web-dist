@@ -1,1 +1,0 @@
-function e(e,t,n){try{let r=n===`ar`?`ar-SA`:n===`fr`?`fr-FR`:`en-US`;return new Intl.NumberFormat(r,{style:`currency`,currency:t,maximumFractionDigits:2}).format(e)}catch{return`${e} ${t}`}}export{e as t};
