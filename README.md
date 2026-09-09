@@ -1,19 +1,35 @@
 # ourscent-web-dist
 
-Build artifact for **ourscent.shaaml.online** (DigitalOcean App Platform static site).
+Deploy artifact for **ourscent.shaaml.online** (DigitalOcean App Platform).
 
-Do not edit by hand — every file here is generated. Rebuild from the
-`ourscent-web` monorepo:
+Generated — do not edit by hand.
 
-    cd apps/web
-    # the content service must be running; loaders execute at BUILD time and
-    # their data is baked into static HTML
-    OURSCENT_DATA_DIR=... uvicorn main:app --port 8000 &
-    PRERENDER_PERFUMES=2000 npx react-router build
+## Why this is a Node service, not a static site
 
-then copy `apps/web/build/client/` into this repo and push.
+The app was originally deployed as static prerendered HTML. That had to be
+abandoned: React Router's prerendered output does not hydrate nested routes.
+Every child route (/brands, /trending, /notes) failed with "Expected server HTML
+to contain a matching <link> in <head>" and fell back to the error boundary,
+while the identical build served by react-router-serve rendered all of them
+cleanly. So this runs as a Node process.
 
-The site is prerendered rather than server-rendered: App Platform serves this
-as a static site, so there is no Node process at runtime. Pages listed in
-`react-router.config.ts`'s `prerender()` become real HTML with data; anything
-else falls back to the catch-all `index.html`.
+## No backend required
+
+`snapshot/` holds the rendered fields for the whole corpus (~18 MB: catalog,
+aggregates, per-perfume details). Loaders read it from disk, so the service
+needs no database and no content API. The scraped source prose is not in the
+snapshot, so third-party copy cannot reach the site.
+
+## Rebuilding
+
+From the ourscent-web monorepo, with the content service running:
+
+    cd services/content && OURSCENT_DATA_DIR=... python3 scripts/export_snapshot.py ../../apps/web/snapshot
+    cd apps/web && npx react-router build
+
+then copy `build/` and `snapshot/` here with the generated package.json and push.
+
+**App Platform does not auto-deploy** — the spec uses a plain git source with no
+deploy_on_push. After pushing run:
+
+    doctl apps create-deployment <app-id>
