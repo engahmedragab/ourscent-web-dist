@@ -3970,6 +3970,12 @@ function Navbar() {
 								className: "absolute top-full mt-2 start-0 w-56\n                  bg-white border border-neutral-200 rounded-b-[32px] rounded-t-2xl\n                  shadow-xl py-2 z-50 animate-fade-up",
 								children: [
 									/* @__PURE__ */ jsxs(Link$1, {
+										to: `${prefix}/finder`,
+										onClick: () => setDiscoverOpen(false),
+										className: "flex items-center gap-2.5 px-5 py-3 text-[13px] text-neutral-700\n                               hover:bg-neutral-50 hover:text-neutral-1000 transition-colors",
+										children: ["🧭 ", t("nav.finder", "مُكتشف العطور")]
+									}),
+									/* @__PURE__ */ jsxs(Link$1, {
 										to: `${prefix}/notes`,
 										onClick: () => setDiscoverOpen(false),
 										className: "flex items-center gap-2.5 px-5 py-3 text-[13px] text-neutral-700\n                               hover:bg-neutral-50 hover:text-neutral-1000 transition-colors",
@@ -4092,6 +4098,11 @@ function Navbar() {
 						to: `${prefix}/trending`,
 						label: t("nav.trending"),
 						emoji: "🔥"
+					},
+					{
+						to: `${prefix}/finder`,
+						label: t("nav.finder", "مُكتشف العطور"),
+						emoji: "🧭"
 					},
 					{
 						to: `${prefix}/notes`,
@@ -4245,6 +4256,10 @@ function Footer() {
 							{
 								to: `${prefix}/notes`,
 								label: t("nav.notes")
+							},
+							{
+								to: `${prefix}/finder`,
+								label: t("nav.finder", "مُكتشف العطور")
 							},
 							{
 								to: `${prefix}/discover/notes`,
@@ -4666,6 +4681,58 @@ var aggregates = () => cache.agg ??= read("aggregates.json", {
 	brands: []
 });
 var details = () => cache.details ??= read("details.json", {});
+/** Catalog rows keyed by folder, so detail-driven scoring can reach card fields. */
+var byFolder = () => cache.byFolder ??= new Map(catalog().map((r) => [r.folder, r]));
+/**
+* note (lowercased) -> folders containing it, across all three tiers.
+*
+* catalog.json carries accords but not notes, so note filtering has to come off
+* details.json. Built once and cached — ~17.5k records is a few hundred ms of
+* work we do not want to repeat per request.
+*/
+var noteIndex = () => cache.noteIndex ??= (() => {
+	const index = /* @__PURE__ */ new Map();
+	for (const d of Object.values(details())) for (const note of [
+		...d.notes_top,
+		...d.notes_heart,
+		...d.notes_base
+	]) {
+		const key = note.toLowerCase();
+		let set = index.get(key);
+		if (!set) index.set(key, set = /* @__PURE__ */ new Set());
+		set.add(d.folder);
+	}
+	return index;
+})();
+/** perfumer (lowercased) -> folders they composed. Same rationale as noteIndex. */
+var perfumerIndex = () => cache.perfumerIndex ??= (() => {
+	const index = /* @__PURE__ */ new Map();
+	for (const d of Object.values(details())) for (const person of d.perfumers) {
+		const key = person.toLowerCase();
+		let set = index.get(key);
+		if (!set) index.set(key, set = /* @__PURE__ */ new Set());
+		set.add(d.folder);
+	}
+	return index;
+})();
+/**
+* Per-folder similarity vectors, precomputed once.
+*
+* Accords arrive from the source ordered strongest-first, so an accord's rank
+* is the only prominence signal in the snapshot. Weight it as 1/(1+rank) —
+* sharing a lead accord counts for much more than sharing a trailing one.
+*
+* Built eagerly for every folder rather than per comparison: scoring one
+* fragrance against the corpus otherwise allocated ~17.5k throwaway Maps.
+*/
+var vectors = () => cache.vectors ??= new Map(Object.values(details()).map((d) => [d.folder, {
+	accords: new Map(d.accords.map((a, i) => [a, 1 / (1 + i)])),
+	notes: new Set([
+		...d.notes_top,
+		...d.notes_heart,
+		...d.notes_base
+	].map((n) => n.toLowerCase()))
+}]));
 /** Strip the ranking-only fields so cards get a stable, minimal shape. */
 function toCard(r) {
 	return {
@@ -4692,6 +4759,14 @@ function listPerfumes(params) {
 	if (params.accord) {
 		const a = params.accord.toLowerCase();
 		rows = rows.filter((r) => (r.accords ?? []).includes(a));
+	}
+	if (params.note) {
+		const folders = noteIndex().get(params.note.toLowerCase());
+		rows = folders ? rows.filter((r) => folders.has(r.folder)) : [];
+	}
+	if (params.perfumer) {
+		const folders = perfumerIndex().get(params.perfumer.toLowerCase());
+		rows = folders ? rows.filter((r) => folders.has(r.folder)) : [];
 	}
 	if (params.gender) {
 		const g = params.gender.toLowerCase();
@@ -4727,6 +4802,13 @@ async function oudPerfumes(limit = 12) {
 		oud: true
 	})).items;
 }
+async function searchPerfumes(query, limit = 40) {
+	return (await listPerfumes({
+		search: query,
+		perPage: limit,
+		sort: "popular"
+	})).items;
+}
 function brands() {
 	return Promise.resolve(aggregates().brands.map((b) => b.name));
 }
@@ -4749,16 +4831,125 @@ function stats() {
 function perfumeDetail(folder) {
 	return Promise.resolve(details()[folder] ?? null);
 }
+/**
+* Content-based neighbours: rank-weighted accord overlap plus note overlap.
+*
+* The previous version scored same-brand at 3 and each shared accord at 1, so
+* the rail was effectively "more from this brand" — a brand match outranked
+* three shared accords. Brand is now a small tiebreak, which is what the rail
+* is actually for: fragrances that smell alike, whoever made them.
+*
+* Deliberately content-only. A behavioural "people who liked this" rail needs
+* collection and rating data from OurScent's own members, which does not exist
+* yet — inheriting it from the source corpus would misattribute it.
+*/
 async function similarPerfumes(folder, limit = 8) {
-	const d = details()[folder];
-	if (!d) return [];
-	const accords = new Set(d.accords);
-	const scored = catalog().filter((r) => r.folder !== folder).map((r) => ({
-		row: r,
-		score: (r.brand === d.brand ? 3 : 0) + (r.accords ?? []).reduce((n, a) => n + (accords.has(a) ? 1 : 0), 0)
-	})).filter((x) => x.score > 0);
+	const source = details()[folder];
+	if (!source) return [];
+	const rows = byFolder();
+	const vecs = vectors();
+	const self = vecs.get(folder);
+	if (!self) return [];
+	const scored = [];
+	for (const [candidateFolder, vec] of vecs) {
+		if (candidateFolder === folder) continue;
+		const row = rows.get(candidateFolder);
+		if (!row) continue;
+		let accordScore = 0;
+		for (const [accord, weight] of vec.accords) {
+			const sourceWeight = self.accords.get(accord);
+			if (sourceWeight) accordScore += weight * sourceWeight;
+		}
+		let shared = 0;
+		for (const note of vec.notes) if (self.notes.has(note)) shared++;
+		const magnitude = Math.sqrt(self.notes.size * vec.notes.size);
+		const noteScore = magnitude ? shared / magnitude : 0;
+		const score = accordScore * 3 + noteScore + (row.brand === source.brand ? .15 : 0);
+		if (score > 0) scored.push({
+			row,
+			score
+		});
+	}
 	scored.sort((a, b) => b.score - a.score || b.row.votes - a.row.votes);
 	return scored.slice(0, limit).map((x) => toCard(x.row));
+}
+/** Resolve seed folders to cards, dropping any that are not in the corpus. */
+function cardsForFolders(folders) {
+	const rows = byFolder();
+	return Promise.resolve(folders.map((f) => rows.get(f)).filter((r) => !!r).map(toCard));
+}
+/**
+* Multi-seed content recommender: name a few fragrances you like, get the ones
+* sitting in the same olfactory cluster.
+*
+* Seeds are merged into one averaged profile rather than scored separately, so
+* a note or accord shared by every seed outweighs one that appears in a single
+* seed — which is what makes adding a third seed sharpen the result instead of
+* just widening it.
+*
+* Content-only, like similarPerfumes: no collection or co-occurrence data
+* exists for OurScent members yet.
+*/
+async function findBySeeds(folders, limit = 24) {
+	const vecs = vectors();
+	const seeds = folders.map((f) => vecs.get(f)).filter((v) => !!v);
+	if (!seeds.length) return [];
+	const profileAccords = /* @__PURE__ */ new Map();
+	const profileNotes = /* @__PURE__ */ new Map();
+	for (const seed of seeds) {
+		for (const [accord, weight] of seed.accords) profileAccords.set(accord, (profileAccords.get(accord) ?? 0) + weight / seeds.length);
+		for (const note of seed.notes) profileNotes.set(note, (profileNotes.get(note) ?? 0) + 1 / seeds.length);
+	}
+	const exclude = new Set(folders);
+	const rows = byFolder();
+	const scored = [];
+	for (const [candidateFolder, vec] of vecs) {
+		if (exclude.has(candidateFolder)) continue;
+		const row = rows.get(candidateFolder);
+		if (!row) continue;
+		let accordScore = 0;
+		const sharedAccords = [];
+		for (const [accord, weight] of vec.accords) {
+			const profileWeight = profileAccords.get(accord);
+			if (profileWeight) {
+				accordScore += weight * profileWeight;
+				sharedAccords.push({
+					name: accord,
+					weight: profileWeight
+				});
+			}
+		}
+		let rawNoteScore = 0;
+		const sharedNotes = [];
+		for (const note of vec.notes) {
+			const profileWeight = profileNotes.get(note);
+			if (profileWeight) {
+				rawNoteScore += profileWeight;
+				sharedNotes.push({
+					name: note,
+					weight: profileWeight
+				});
+			}
+		}
+		const magnitude = Math.sqrt(profileNotes.size * vec.notes.size);
+		const noteScore = magnitude ? rawNoteScore / magnitude : 0;
+		const score = accordScore * 3 + noteScore;
+		if (score <= 0) continue;
+		sharedAccords.sort((a, b) => b.weight - a.weight);
+		sharedNotes.sort((a, b) => b.weight - a.weight);
+		scored.push({
+			row,
+			score,
+			accords: sharedAccords.map((a) => a.name),
+			notes: sharedNotes.map((n) => n.name)
+		});
+	}
+	scored.sort((a, b) => b.score - a.score || b.row.votes - a.row.votes);
+	return scored.slice(0, limit).map((x) => ({
+		perfume: toCard(x.row),
+		sharedAccords: x.accords.slice(0, 4),
+		sharedNotes: x.notes.slice(0, 5)
+	}));
 }
 //#endregion
 //#region src/components/SEO.tsx
@@ -5049,10 +5240,10 @@ function HomePage() {
 //#region app/routes/home.tsx
 var home_exports = /* @__PURE__ */ __exportAll({
 	default: () => home_default,
-	loader: () => loader$7,
-	meta: () => meta$7
+	loader: () => loader$8,
+	meta: () => meta$8
 });
-async function loader$7({ params }) {
+async function loader$8({ params }) {
 	const lang = [
 		"ar",
 		"en",
@@ -5074,7 +5265,7 @@ async function loader$7({ params }) {
 	};
 }
 var home_default = UNSAFE_withComponentProps(HomePage);
-function meta$7({ data }) {
+function meta$8({ data }) {
 	const lang = data?.lang ?? "ar";
 	return buildMeta({
 		title: "عطرنا | اكتشف عطرك المثالي",
@@ -5224,6 +5415,8 @@ function BrowsePage() {
 		const merged = {
 			search: filters.search,
 			accord: filters.accord,
+			note: filters.note,
+			perfumer: filters.perfumer,
 			gender: filters.gender,
 			oud: filters.oud ? "true" : void 0,
 			sort: sort !== "popular" ? sort : void 0,
@@ -5242,10 +5435,12 @@ function BrowsePage() {
 	const activeFacets = [
 		filters.search,
 		filters.accord,
+		filters.note,
+		filters.perfumer,
 		filters.gender,
 		filters.oud
 	].filter(Boolean).length;
-	const heading = filters.accord ? `${t("browse.accord_heading", "عطور")} ${filters.accord}` : filters.search ? `${t("common.search", "بحث")}: ${filters.search}` : t("nav.browse", "تصفّح العطور");
+	const heading = filters.perfumer ? `${t("browse.perfumer_heading", "عطور من تأليف")} ${filters.perfumer}` : filters.note ? `${t("browse.note_heading", "عطور تحتوي")} ${filters.note}` : filters.accord ? `${t("browse.accord_heading", "عطور")} ${filters.accord}` : filters.search ? `${t("common.search", "بحث")}: ${filters.search}` : t("nav.browse", "تصفّح العطور");
 	const chip = (active) => `rounded-full border px-3 py-1.5 text-sm transition-colors ${active ? "border-neutral-900 bg-neutral-900 text-white" : "border-neutral-200 bg-white text-neutral-700 hover:border-neutral-900"}`;
 	return /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(SEO, {
 		title: page > 1 ? `${heading} — ${t("common.page", "صفحة")} ${page}` : heading,
@@ -5272,60 +5467,92 @@ function BrowsePage() {
 			}),
 			/* @__PURE__ */ jsxs("div", {
 				className: "mb-6 flex flex-col gap-3",
-				children: [/* @__PURE__ */ jsxs("div", {
-					className: "flex flex-wrap items-center gap-2",
-					children: [
-						/* @__PURE__ */ jsx("span", {
+				children: [
+					[[
+						"note",
+						filters.note,
+						t("fragrance.note", "المكوّن")
+					], [
+						"perfumer",
+						filters.perfumer,
+						t("fragrance.perfumers", "صانع العطر")
+					]].map(([key, value, label]) => value ? /* @__PURE__ */ jsxs("div", {
+						className: "flex flex-wrap items-center gap-2",
+						children: [/* @__PURE__ */ jsx("span", {
 							className: "text-xs font-semibold text-neutral-500",
-							children: t("home.explore_accords", "العائلات العطرية")
-						}),
-						/* @__PURE__ */ jsx(Link, {
-							to: urlWith({ accord: void 0 }),
-							className: chip(!filters.accord),
-							children: t("common.all", "الكل")
-						}),
-						accords.slice(0, 14).map((a) => /* @__PURE__ */ jsx(Link, {
-							to: urlWith({ accord: filters.accord === a.name ? void 0 : a.name }),
-							className: chip(filters.accord === a.name),
-							children: a.name
-						}, a.name))
-					]
-				}), /* @__PURE__ */ jsxs("div", {
-					className: "flex flex-wrap items-center gap-2",
-					children: [
-						/* @__PURE__ */ jsx("span", {
-							className: "text-xs font-semibold text-neutral-500",
-							children: t("browse.refine", "تصفية")
-						}),
-						/* @__PURE__ */ jsx(Link, {
-							to: urlWith({ oud: filters.oud ? void 0 : "true" }),
-							className: chip(!!filters.oud),
-							children: t("fragrance.oud", "عود")
-						}),
-						[
-							"Women",
-							"Men",
-							"Unisex"
-						].map((g) => /* @__PURE__ */ jsx(Link, {
-							to: urlWith({ gender: filters.gender === g ? void 0 : g }),
-							className: chip(filters.gender === g),
-							children: g
-						}, g)),
-						/* @__PURE__ */ jsx("span", {
-							className: "mx-1 h-5 w-px bg-neutral-200",
-							"aria-hidden": true
-						}),
-						[
-							"popular",
-							"rating",
-							"name"
-						].map((s) => /* @__PURE__ */ jsx(Link, {
-							to: urlWith({ sort: s === "popular" ? void 0 : s }),
-							className: chip(sort === s),
-							children: s === "popular" ? t("sort.popular", "الأشهر") : s === "rating" ? t("sort.rating", "الأعلى تقييماً") : t("sort.name", "أبجدياً")
-						}, s))
-					]
-				})]
+							children: label
+						}), /* @__PURE__ */ jsxs(Link, {
+							to: urlWith({ [key]: void 0 }),
+							className: "inline-flex items-center gap-2 rounded-full border border-neutral-900 bg-neutral-900 px-3 py-1.5 text-sm text-white transition-colors hover:bg-neutral-700",
+							children: [
+								value,
+								/* @__PURE__ */ jsx("span", {
+									"aria-hidden": true,
+									children: "×"
+								}),
+								/* @__PURE__ */ jsx("span", {
+									className: "sr-only",
+									children: t("common.remove", "إزالة")
+								})
+							]
+						})]
+					}, key) : null),
+					/* @__PURE__ */ jsxs("div", {
+						className: "flex flex-wrap items-center gap-2",
+						children: [
+							/* @__PURE__ */ jsx("span", {
+								className: "text-xs font-semibold text-neutral-500",
+								children: t("home.explore_accords", "العائلات العطرية")
+							}),
+							/* @__PURE__ */ jsx(Link, {
+								to: urlWith({ accord: void 0 }),
+								className: chip(!filters.accord),
+								children: t("common.all", "الكل")
+							}),
+							accords.slice(0, 14).map((a) => /* @__PURE__ */ jsx(Link, {
+								to: urlWith({ accord: filters.accord === a.name ? void 0 : a.name }),
+								className: chip(filters.accord === a.name),
+								children: a.name
+							}, a.name))
+						]
+					}),
+					/* @__PURE__ */ jsxs("div", {
+						className: "flex flex-wrap items-center gap-2",
+						children: [
+							/* @__PURE__ */ jsx("span", {
+								className: "text-xs font-semibold text-neutral-500",
+								children: t("browse.refine", "تصفية")
+							}),
+							/* @__PURE__ */ jsx(Link, {
+								to: urlWith({ oud: filters.oud ? void 0 : "true" }),
+								className: chip(!!filters.oud),
+								children: t("fragrance.oud", "عود")
+							}),
+							[
+								"Women",
+								"Men",
+								"Unisex"
+							].map((g) => /* @__PURE__ */ jsx(Link, {
+								to: urlWith({ gender: filters.gender === g ? void 0 : g }),
+								className: chip(filters.gender === g),
+								children: g
+							}, g)),
+							/* @__PURE__ */ jsx("span", {
+								className: "mx-1 h-5 w-px bg-neutral-200",
+								"aria-hidden": true
+							}),
+							[
+								"popular",
+								"rating",
+								"name"
+							].map((s) => /* @__PURE__ */ jsx(Link, {
+								to: urlWith({ sort: s === "popular" ? void 0 : s }),
+								className: chip(sort === s),
+								children: s === "popular" ? t("sort.popular", "الأشهر") : s === "rating" ? t("sort.rating", "الأعلى تقييماً") : t("sort.name", "أبجدياً")
+							}, s))
+						]
+					})
+				]
 			}),
 			perfumes.length === 0 ? /* @__PURE__ */ jsx("p", {
 				className: "py-16 text-center text-neutral-500",
@@ -5349,11 +5576,11 @@ function BrowsePage() {
 //#region app/routes/browse.tsx
 var browse_exports = /* @__PURE__ */ __exportAll({
 	default: () => browse_default,
-	loader: () => loader$6,
-	meta: () => meta$6
+	loader: () => loader$7,
+	meta: () => meta$7
 });
 var PER_PAGE$2 = 24;
-async function loader$6({ params, request }) {
+async function loader$7({ params, request }) {
 	const lang = [
 		"ar",
 		"en",
@@ -5363,6 +5590,8 @@ async function loader$6({ params, request }) {
 	const filters = {
 		search: q.get("search") ?? void 0,
 		accord: q.get("accord") ?? void 0,
+		note: q.get("note") ?? void 0,
+		perfumer: q.get("perfumer") ?? void 0,
 		gender: q.get("gender") ?? void 0,
 		oud: q.get("oud") === "true" ? true : void 0
 	};
@@ -5387,7 +5616,7 @@ async function loader$6({ params, request }) {
 	};
 }
 var browse_default = UNSAFE_withComponentProps(BrowsePage);
-function meta$6({ data }) {
+function meta$7({ data }) {
 	const lang = data?.lang ?? "ar";
 	const accord = data?.filters?.accord;
 	const deep = (data?.page ?? 1) > 1;
@@ -5407,7 +5636,12 @@ function meta$6({ data }) {
 }
 //#endregion
 //#region src/pages/FragrancePage.tsx
-function NoteTier({ title, notes }) {
+/**
+* Notes link into /browse?note=, not /note/:slug — the latter is served by the
+* scent API, which the SSR deployment has no backend for. Browse reads the
+* snapshot, so these links resolve on the deployed site.
+*/
+function NoteTier({ title, notes, prefix }) {
 	if (!notes.length) return null;
 	return /* @__PURE__ */ jsxs("div", {
 		className: "flex flex-col gap-2 sm:flex-row sm:items-baseline sm:gap-4",
@@ -5416,17 +5650,46 @@ function NoteTier({ title, notes }) {
 			children: title
 		}), /* @__PURE__ */ jsx("ul", {
 			className: "flex flex-wrap gap-2",
-			children: notes.map((note) => /* @__PURE__ */ jsx("li", {
-				className: "rounded-full border border-neutral-200 bg-white px-3 py-1 text-sm text-neutral-800",
+			children: notes.map((note) => /* @__PURE__ */ jsx("li", { children: /* @__PURE__ */ jsx(Link, {
+				to: `${prefix}/browse?note=${encodeURIComponent(note)}`,
+				className: "inline-block rounded-full border border-neutral-200 bg-white px-3 py-1 text-sm text-neutral-800 transition-colors hover:border-neutral-900 hover:bg-neutral-50",
 				children: note
-			}, note))
+			}) }, note))
 		})]
+	});
+}
+/**
+* Accords arrive ordered strongest-first and the snapshot carries no strength
+* values, so the bar encodes rank alone. No percentage is shown, because we do
+* not have one — inventing a number here would be fabricating data.
+*/
+function AccordStrengthBars({ accords, prefix }) {
+	return /* @__PURE__ */ jsx("ul", {
+		className: "flex flex-col gap-1.5",
+		children: accords.map((accord, i) => {
+			const width = 100 - i / Math.max(accords.length, 1) * 55;
+			return /* @__PURE__ */ jsx("li", { children: /* @__PURE__ */ jsxs(Link, {
+				to: `${prefix}/browse?accord=${encodeURIComponent(accord)}`,
+				className: "group flex items-center gap-3 rounded-md py-0.5",
+				children: [/* @__PURE__ */ jsx("span", {
+					className: "w-28 shrink-0 truncate text-sm text-neutral-700 group-hover:text-neutral-900",
+					children: accord
+				}), /* @__PURE__ */ jsx("span", {
+					className: "h-2.5 flex-1 overflow-hidden rounded-full bg-neutral-100",
+					children: /* @__PURE__ */ jsx("span", {
+						className: "block h-full rounded-full bg-neutral-900 transition-opacity group-hover:opacity-80",
+						style: { width: `${width}%` }
+					})
+				})]
+			}) }, accord);
+		})
 	});
 }
 function FragrancePage() {
 	const { lang, perfume, similar } = useLoaderData();
 	const { t } = useTranslation();
 	const prefix = lang === "ar" ? "" : `/${lang}`;
+	const numberLocale = lang === "ar" ? "ar-EG" : lang === "fr" ? "fr-FR" : "en-US";
 	const [imgIndex, setImgIndex] = useState(0);
 	const [failed, setFailed] = useState(false);
 	const images = perfume.local_images ?? [];
@@ -5533,8 +5796,9 @@ function FragrancePage() {
 						})
 					}, src))
 				})] }), /* @__PURE__ */ jsxs("div", { children: [
-					/* @__PURE__ */ jsx("p", {
-						className: "text-sm uppercase tracking-wide text-neutral-500",
+					/* @__PURE__ */ jsx(Link, {
+						to: `${prefix}/brand/${encodeURIComponent(perfume.brand)}`,
+						className: "text-sm uppercase tracking-wide text-neutral-500 underline-offset-4 hover:text-neutral-900 hover:underline",
 						children: perfume.brand
 					}),
 					/* @__PURE__ */ jsx("h1", {
@@ -5552,18 +5816,20 @@ function FragrancePage() {
 								}), /* @__PURE__ */ jsxs("span", {
 									className: "text-xs text-amber-700",
 									children: [
-										perfume.votes.toLocaleString("ar-EG"),
+										perfume.votes.toLocaleString(numberLocale),
 										" ",
 										t("fragrance.votes", "تقييم")
 									]
 								})]
 							}) : null,
-							perfume.gender_official && /* @__PURE__ */ jsx("span", {
-								className: "rounded-full border border-neutral-200 px-3 py-1 text-sm text-neutral-700",
+							perfume.gender_official && /* @__PURE__ */ jsx(Link, {
+								to: `${prefix}/browse?gender=${encodeURIComponent(perfume.gender_official)}`,
+								className: "rounded-full border border-neutral-200 px-3 py-1 text-sm text-neutral-700 transition-colors hover:border-neutral-900",
 								children: perfume.gender_official
 							}),
-							perfume.oud && /* @__PURE__ */ jsx("span", {
-								className: "rounded-full bg-amber-900 px-3 py-1 text-sm text-amber-50",
+							perfume.oud && /* @__PURE__ */ jsx(Link, {
+								to: `${prefix}/browse?oud=true`,
+								className: "rounded-full bg-amber-900 px-3 py-1 text-sm text-amber-50 transition-opacity hover:opacity-90",
 								children: t("fragrance.oud", "يحتوي عود")
 							}),
 							perfume.is_alcohol_free && /* @__PURE__ */ jsx("span", {
@@ -5577,13 +5843,9 @@ function FragrancePage() {
 						children: [/* @__PURE__ */ jsx("h2", {
 							className: "mb-3 text-base font-semibold text-neutral-900",
 							children: t("fragrance.accords", "العائلات العطرية")
-						}), /* @__PURE__ */ jsx("ul", {
-							className: "flex flex-wrap gap-2",
-							children: perfume.accords.map((accord) => /* @__PURE__ */ jsx("li", { children: /* @__PURE__ */ jsx(Link, {
-								to: `${prefix}/browse?accord=${encodeURIComponent(accord)}`,
-								className: "rounded-full bg-neutral-900 px-3 py-1 text-sm text-white transition-colors hover:bg-neutral-700",
-								children: accord
-							}) }, accord))
+						}), /* @__PURE__ */ jsx(AccordStrengthBars, {
+							accords: perfume.accords,
+							prefix
 						})]
 					}),
 					hasNotes && /* @__PURE__ */ jsxs("section", {
@@ -5596,15 +5858,18 @@ function FragrancePage() {
 							children: [
 								/* @__PURE__ */ jsx(NoteTier, {
 									title: t("fragrance.notes_top", "المقدّمة"),
-									notes: perfume.notes_top
+									notes: perfume.notes_top,
+									prefix
 								}),
 								/* @__PURE__ */ jsx(NoteTier, {
 									title: t("fragrance.notes_heart", "القلب"),
-									notes: perfume.notes_heart
+									notes: perfume.notes_heart,
+									prefix
 								}),
 								/* @__PURE__ */ jsx(NoteTier, {
 									title: t("fragrance.notes_base", "القاعدة"),
-									notes: perfume.notes_base
+									notes: perfume.notes_base,
+									prefix
 								})
 							]
 						})]
@@ -5617,7 +5882,7 @@ function FragrancePage() {
 						}), /* @__PURE__ */ jsx("ul", {
 							className: "flex flex-wrap gap-2",
 							children: perfume.perfumers.map((person) => /* @__PURE__ */ jsx("li", { children: /* @__PURE__ */ jsx(Link, {
-								to: `${prefix}/perfumer/${encodeURIComponent(person)}`,
+								to: `${prefix}/browse?perfumer=${encodeURIComponent(person)}`,
 								className: "rounded-lg border border-neutral-200 px-3 py-1.5 text-sm text-neutral-800 hover:border-neutral-900",
 								children: person
 							}) }, person))
@@ -5645,10 +5910,10 @@ function FragrancePage() {
 //#region app/routes/fragrance.tsx
 var fragrance_exports = /* @__PURE__ */ __exportAll({
 	default: () => fragrance_default,
-	loader: () => loader$5,
-	meta: () => meta$5
+	loader: () => loader$6,
+	meta: () => meta$6
 });
-async function loader$5({ params }) {
+async function loader$6({ params }) {
 	const lang = [
 		"ar",
 		"en",
@@ -5681,7 +5946,7 @@ async function loader$5({ params }) {
 	};
 }
 var fragrance_default = UNSAFE_withComponentProps(FragrancePage);
-function meta$5({ data }) {
+function meta$6({ data }) {
 	const lang = data?.lang ?? "ar";
 	const p = data?.perfume;
 	if (!p) return buildMeta({
@@ -5803,10 +6068,10 @@ function BrandsPage() {
 //#region app/routes/brands.tsx
 var brands_exports = /* @__PURE__ */ __exportAll({
 	default: () => brands_default,
-	loader: () => loader$4,
-	meta: () => meta$4
+	loader: () => loader$5,
+	meta: () => meta$5
 });
-async function loader$4({ params }) {
+async function loader$5({ params }) {
 	return {
 		lang: [
 			"ar",
@@ -5817,7 +6082,7 @@ async function loader$4({ params }) {
 	};
 }
 var brands_default = UNSAFE_withComponentProps(BrandsPage);
-function meta$4({ data }) {
+function meta$5({ data }) {
 	const lang = data?.lang ?? "ar";
 	return buildMeta({
 		title: "العلامات التجارية",
@@ -5920,11 +6185,11 @@ function BrandPage() {
 //#region app/routes/brand.tsx
 var brand_exports = /* @__PURE__ */ __exportAll({
 	default: () => brand_default,
-	loader: () => loader$3,
-	meta: () => meta$3
+	loader: () => loader$4,
+	meta: () => meta$4
 });
 var PER_PAGE$1 = 24;
-async function loader$3({ params, request }) {
+async function loader$4({ params, request }) {
 	const lang = [
 		"ar",
 		"en",
@@ -5953,7 +6218,7 @@ async function loader$3({ params, request }) {
 	};
 }
 var brand_default = UNSAFE_withComponentProps(BrandPage);
-function meta$3({ data }) {
+function meta$4({ data }) {
 	const lang = data?.lang ?? "ar";
 	const brand = data?.brand ?? "";
 	const deep = (data?.page ?? 1) > 1;
@@ -6041,10 +6306,10 @@ function NotesPage() {
 //#region app/routes/notes.tsx
 var notes_exports = /* @__PURE__ */ __exportAll({
 	default: () => notes_default,
-	loader: () => loader$2,
-	meta: () => meta$2
+	loader: () => loader$3,
+	meta: () => meta$3
 });
-async function loader$2({ params }) {
+async function loader$3({ params }) {
 	return {
 		lang: [
 			"ar",
@@ -6055,7 +6320,7 @@ async function loader$2({ params }) {
 	};
 }
 var notes_default = UNSAFE_withComponentProps(NotesPage);
-function meta$2({ data }) {
+function meta$3({ data }) {
 	const lang = data?.lang ?? "ar";
 	const notes = data?.notes ?? [];
 	return buildMeta({
@@ -6717,11 +6982,11 @@ function TrendingPage() {
 //#region app/routes/trending.tsx
 var trending_exports = /* @__PURE__ */ __exportAll({
 	default: () => trending_default,
-	loader: () => loader$1,
-	meta: () => meta$1
+	loader: () => loader$2,
+	meta: () => meta$2
 });
 var PER_PAGE = 24;
-async function loader$1({ params, request }) {
+async function loader$2({ params, request }) {
 	const lang = [
 		"ar",
 		"en",
@@ -6746,7 +7011,7 @@ async function loader$1({ params, request }) {
 	};
 }
 var trending_default = UNSAFE_withComponentProps(TrendingPage);
-function meta$1({ data }) {
+function meta$2({ data }) {
 	const lang = data?.lang ?? "ar";
 	const deep = (data?.page ?? 1) > 1;
 	return buildMeta({
@@ -7662,6 +7927,222 @@ function ComparePage() {
 //#endregion
 //#region app/routes/compare.tsx
 var compare_exports = /* @__PURE__ */ __exportAll({ default: () => ComparePage });
+//#endregion
+//#region src/pages/FinderPage.tsx
+function FinderPage() {
+	const { lang, seeds, matches, query, searchResults, maxSeeds } = useLoaderData();
+	const { t } = useTranslation();
+	const prefix = lang === "ar" ? "" : `/${lang}`;
+	const base = `${prefix}/finder`;
+	const seedFolders = seeds.map((s) => s.folder);
+	const full = seedFolders.length >= maxSeeds;
+	/** Every control is a link or a GET form, so the whole finder works without JS. */
+	const urlFor = (folders, q) => {
+		const qs = new URLSearchParams();
+		for (const f of folders) qs.append("seed", f);
+		if (q) qs.set("q", q);
+		const s = qs.toString();
+		return s ? `${base}?${s}` : base;
+	};
+	return /* @__PURE__ */ jsxs(Fragment, { children: [/* @__PURE__ */ jsx(SEO, {
+		title: t("finder.title", "مُكتشف العطور"),
+		description: t("seo.finder_desc", "اختر عطوراً تحبها ودع المُكتشف يقترح عطوراً من العائلة العطرية نفسها."),
+		canonical: `${SITE_URL}${base}`,
+		lang,
+		robots: seedFolders.length ? "noindex,follow" : void 0
+	}), /* @__PURE__ */ jsxs("div", {
+		className: "mx-auto max-w-6xl px-4 py-10",
+		children: [
+			/* @__PURE__ */ jsxs("header", {
+				className: "mb-8 max-w-2xl",
+				children: [/* @__PURE__ */ jsx("h1", {
+					className: "text-2xl font-bold text-neutral-900 sm:text-3xl",
+					children: t("finder.title", "مُكتشف العطور")
+				}), /* @__PURE__ */ jsx("p", {
+					className: "mt-2 text-sm leading-relaxed text-neutral-600",
+					children: t("finder.intro", "أضف عطراً أو أكثر تحبه، وسنقترح عطوراً تشترك معه في العائلات العطرية والمكوّنات. كلما أضفت عطراً، صار الاقتراح أدق.")
+				})]
+			}),
+			/* @__PURE__ */ jsxs("section", {
+				className: "mb-8 rounded-xl border border-neutral-200 bg-white p-4 sm:p-5",
+				children: [
+					/* @__PURE__ */ jsxs("h2", {
+						className: "text-sm font-semibold text-neutral-900",
+						children: [
+							t("finder.your_picks", "اختياراتك"),
+							" ",
+							/* @__PURE__ */ jsxs("span", {
+								className: "font-normal text-neutral-500",
+								children: [
+									"(",
+									seedFolders.length,
+									"/",
+									maxSeeds,
+									")"
+								]
+							})
+						]
+					}),
+					seeds.length === 0 ? /* @__PURE__ */ jsx("p", {
+						className: "mt-2 text-sm text-neutral-500",
+						children: t("finder.no_seeds", "لم تختر أي عطر بعد. ابحث عن عطر تحبه وأضفه.")
+					}) : /* @__PURE__ */ jsx("ul", {
+						className: "mt-3 flex flex-wrap gap-2",
+						children: seeds.map((seed) => /* @__PURE__ */ jsx("li", { children: /* @__PURE__ */ jsxs(Link, {
+							to: urlFor(seedFolders.filter((f) => f !== seed.folder), query),
+							className: "inline-flex items-center gap-2 rounded-full border border-neutral-900 bg-neutral-900 px-3 py-1.5 text-sm text-white transition-colors hover:bg-neutral-700",
+							children: [
+								/* @__PURE__ */ jsxs("span", {
+									className: "max-w-[16rem] truncate",
+									children: [
+										seed.name,
+										" ",
+										/* @__PURE__ */ jsxs("span", {
+											className: "opacity-70",
+											children: ["· ", seed.brand]
+										})
+									]
+								}),
+								/* @__PURE__ */ jsx("span", {
+									"aria-hidden": true,
+									children: "×"
+								}),
+								/* @__PURE__ */ jsx("span", {
+									className: "sr-only",
+									children: t("common.remove", "إزالة")
+								})
+							]
+						}) }, seed.folder))
+					}),
+					/* @__PURE__ */ jsxs("form", {
+						method: "get",
+						action: base,
+						className: "mt-4 flex flex-wrap gap-2",
+						children: [
+							seedFolders.map((f) => /* @__PURE__ */ jsx("input", {
+								type: "hidden",
+								name: "seed",
+								value: f
+							}, f)),
+							/* @__PURE__ */ jsx("input", {
+								type: "search",
+								name: "q",
+								defaultValue: query,
+								disabled: full,
+								placeholder: t("finder.search_placeholder", "ابحث عن عطر بالاسم أو العلامة…"),
+								"aria-label": t("finder.search_label", "ابحث عن عطر لإضافته"),
+								className: "min-w-0 flex-1 rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-900 placeholder:text-neutral-400 focus:border-neutral-900 focus:outline-none disabled:bg-neutral-50 disabled:text-neutral-400"
+							}),
+							/* @__PURE__ */ jsx("button", {
+								type: "submit",
+								disabled: full,
+								className: "rounded-lg bg-neutral-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:bg-neutral-300",
+								children: t("common.search", "بحث")
+							})
+						]
+					}),
+					full && /* @__PURE__ */ jsx("p", {
+						className: "mt-2 text-xs text-neutral-500",
+						children: t("finder.max_reached", "وصلت للحد الأقصى. احذف عطراً لإضافة آخر.")
+					}),
+					query && !full && (searchResults.length === 0 ? /* @__PURE__ */ jsx("p", {
+						className: "mt-3 text-sm text-neutral-500",
+						children: t("common.no_results", "لا توجد نتائج")
+					}) : /* @__PURE__ */ jsx("ul", {
+						className: "mt-3 flex flex-col gap-1.5",
+						children: searchResults.filter((r) => !seedFolders.includes(r.folder)).map((result) => /* @__PURE__ */ jsx("li", { children: /* @__PURE__ */ jsxs(Link, {
+							to: urlFor([...seedFolders, result.folder]),
+							className: "flex items-center gap-2 rounded-lg border border-neutral-200 px-3 py-2 text-sm text-neutral-800 transition-colors hover:border-neutral-900 hover:bg-neutral-50",
+							children: [/* @__PURE__ */ jsx("span", {
+								"aria-hidden": true,
+								className: "text-neutral-400",
+								children: "+"
+							}), /* @__PURE__ */ jsxs("span", {
+								className: "truncate",
+								children: [result.name, /* @__PURE__ */ jsxs("span", {
+									className: "text-neutral-500",
+									children: [" · ", result.brand]
+								})]
+							})]
+						}) }, result.folder))
+					}))
+				]
+			}),
+			seedFolders.length === 0 ? /* @__PURE__ */ jsx("p", {
+				className: "rounded-xl border border-dashed border-neutral-300 py-16 text-center text-sm text-neutral-500",
+				children: t("finder.empty_hint", "أضف عطراً واحداً على الأقل لعرض الاقتراحات.")
+			}) : matches.length === 0 ? /* @__PURE__ */ jsx("p", {
+				className: "py-16 text-center text-sm text-neutral-500",
+				children: t("common.no_results", "لا توجد نتائج")
+			}) : /* @__PURE__ */ jsxs("section", { children: [/* @__PURE__ */ jsx("h2", {
+				className: "mb-5 text-xl font-bold text-neutral-900",
+				children: t("finder.results", "قد يعجبك أيضاً")
+			}), /* @__PURE__ */ jsx("ul", {
+				className: "grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4",
+				children: matches.map((match) => /* @__PURE__ */ jsxs("li", {
+					className: "flex flex-col gap-2",
+					children: [/* @__PURE__ */ jsx(CorpusTile, {
+						perfume: match.perfume,
+						href: `${prefix}/fragrance/${encodeURIComponent(match.perfume.folder)}`
+					}), (match.sharedAccords.length > 0 || match.sharedNotes.length > 0) && /* @__PURE__ */ jsxs("div", {
+						className: "px-1 text-[11px] leading-relaxed text-neutral-500",
+						children: [
+							/* @__PURE__ */ jsxs("span", {
+								className: "font-medium text-neutral-600",
+								children: [t("finder.because", "يشترك في"), ":"]
+							}),
+							" ",
+							[...match.sharedAccords, ...match.sharedNotes].slice(0, 4).join("، ")
+						]
+					})]
+				}, match.perfume.folder))
+			})] })
+		]
+	})] });
+}
+//#endregion
+//#region app/routes/finder.tsx
+var finder_exports = /* @__PURE__ */ __exportAll({
+	default: () => finder_default,
+	loader: () => loader$1,
+	meta: () => meta$1
+});
+/** Enough seeds to sharpen a profile, few enough to keep the URL shareable. */
+var MAX_SEEDS = 5;
+async function loader$1({ params, request }) {
+	const lang = [
+		"ar",
+		"en",
+		"fr"
+	].includes(params.lang ?? "") ? params.lang : "ar";
+	const url = new URL(request.url);
+	const seedFolders = url.searchParams.getAll("seed").filter(Boolean).slice(0, MAX_SEEDS);
+	const query = url.searchParams.get("q")?.trim() ?? "";
+	const [seeds, matches, searchResults] = await Promise.all([
+		cardsForFolders(seedFolders),
+		seedFolders.length ? findBySeeds(seedFolders, 24) : Promise.resolve([]),
+		query ? searchPerfumes(query, 12) : Promise.resolve([])
+	]);
+	return {
+		lang,
+		seeds,
+		matches,
+		query,
+		searchResults,
+		maxSeeds: MAX_SEEDS
+	};
+}
+var finder_default = UNSAFE_withComponentProps(FinderPage);
+function meta$1({ data }) {
+	const lang = data?.lang ?? "ar";
+	return buildMeta({
+		title: "مُكتشف العطور",
+		description: "اختر عطوراً تحبها ودع المُكتشف يقترح عطوراً من العائلة العطرية نفسها — بالمكوّنات والعائلات، لا بالتخمين.",
+		canonical: `${SITE_URL$1}${lang === "ar" ? "" : `/${lang}`}/finder`,
+		lang,
+		robots: data?.seeds.length ? "noindex,follow" : void 0
+	});
+}
 //#endregion
 //#region src/pages/AccordSearchPage.tsx
 function AccordSearchPage() {
@@ -8779,7 +9260,7 @@ var server_manifest_default = {
 				"/assets/ourinc-notifications-BZfY8PPZ.js",
 				"/assets/authToken-DnaOPsTB.js"
 			],
-			"css": ["/assets/style-paNFx_QP.css"],
+			"css": ["/assets/style-BHgLW_K6.css"],
 			"clientActionModule": void 0,
 			"clientLoaderModule": void 0,
 			"clientMiddlewareModule": void 0,
@@ -8798,7 +9279,7 @@ var server_manifest_default = {
 			"hasClientMiddleware": false,
 			"hasDefaultExport": true,
 			"hasErrorBoundary": false,
-			"module": "/assets/lang-layout-Chy7mAA7.js",
+			"module": "/assets/lang-layout-Z16syJ_h.js",
 			"imports": [
 				"/assets/jsx-runtime-OQpaS_Dv.js",
 				"/assets/chunk-BV7QT456-DRL8PfnM.js",
@@ -8858,7 +9339,7 @@ var server_manifest_default = {
 			"hasClientMiddleware": false,
 			"hasDefaultExport": true,
 			"hasErrorBoundary": false,
-			"module": "/assets/browse-hjnxAe4f.js",
+			"module": "/assets/browse-CWOvGXGy.js",
 			"imports": [
 				"/assets/jsx-runtime-OQpaS_Dv.js",
 				"/assets/chunk-BV7QT456-DRL8PfnM.js",
@@ -8888,7 +9369,7 @@ var server_manifest_default = {
 			"hasClientMiddleware": false,
 			"hasDefaultExport": true,
 			"hasErrorBoundary": false,
-			"module": "/assets/fragrance-CevGLaNq.js",
+			"module": "/assets/fragrance-CafPPrVe.js",
 			"imports": [
 				"/assets/jsx-runtime-OQpaS_Dv.js",
 				"/assets/chunk-BV7QT456-DRL8PfnM.js",
@@ -9278,6 +9759,35 @@ var server_manifest_default = {
 			"clientMiddlewareModule": void 0,
 			"hydrateFallbackModule": void 0
 		},
+		"root-finder": {
+			"id": "root-finder",
+			"parentId": "routes/lang-layout",
+			"path": "finder",
+			"index": void 0,
+			"caseSensitive": void 0,
+			"hasAction": false,
+			"hasLoader": true,
+			"hasClientAction": false,
+			"hasClientLoader": false,
+			"hasClientMiddleware": false,
+			"hasDefaultExport": true,
+			"hasErrorBoundary": false,
+			"module": "/assets/finder-DeB-sE_j.js",
+			"imports": [
+				"/assets/jsx-runtime-OQpaS_Dv.js",
+				"/assets/chunk-BV7QT456-DRL8PfnM.js",
+				"/assets/useTranslation-D3cieaht.js",
+				"/assets/seo-BPqXQ8mV.js",
+				"/assets/SEO-DwlER4MH.js",
+				"/assets/CorpusTile-4Vgm0u2a.js",
+				"/assets/i18nInstance-DuAUdJZQ.js"
+			],
+			"css": [],
+			"clientActionModule": void 0,
+			"clientLoaderModule": void 0,
+			"clientMiddlewareModule": void 0,
+			"hydrateFallbackModule": void 0
+		},
 		"root-discover-accords": {
 			"id": "root-discover-accords",
 			"parentId": "routes/lang-layout",
@@ -9517,7 +10027,7 @@ var server_manifest_default = {
 			"hasClientMiddleware": false,
 			"hasDefaultExport": true,
 			"hasErrorBoundary": false,
-			"module": "/assets/lang-layout-Chy7mAA7.js",
+			"module": "/assets/lang-layout-Z16syJ_h.js",
 			"imports": [
 				"/assets/jsx-runtime-OQpaS_Dv.js",
 				"/assets/chunk-BV7QT456-DRL8PfnM.js",
@@ -9577,7 +10087,7 @@ var server_manifest_default = {
 			"hasClientMiddleware": false,
 			"hasDefaultExport": true,
 			"hasErrorBoundary": false,
-			"module": "/assets/browse-hjnxAe4f.js",
+			"module": "/assets/browse-CWOvGXGy.js",
 			"imports": [
 				"/assets/jsx-runtime-OQpaS_Dv.js",
 				"/assets/chunk-BV7QT456-DRL8PfnM.js",
@@ -9607,7 +10117,7 @@ var server_manifest_default = {
 			"hasClientMiddleware": false,
 			"hasDefaultExport": true,
 			"hasErrorBoundary": false,
-			"module": "/assets/fragrance-CevGLaNq.js",
+			"module": "/assets/fragrance-CafPPrVe.js",
 			"imports": [
 				"/assets/jsx-runtime-OQpaS_Dv.js",
 				"/assets/chunk-BV7QT456-DRL8PfnM.js",
@@ -9997,6 +10507,35 @@ var server_manifest_default = {
 			"clientMiddlewareModule": void 0,
 			"hydrateFallbackModule": void 0
 		},
+		"lang-finder": {
+			"id": "lang-finder",
+			"parentId": "lang",
+			"path": "finder",
+			"index": void 0,
+			"caseSensitive": void 0,
+			"hasAction": false,
+			"hasLoader": true,
+			"hasClientAction": false,
+			"hasClientLoader": false,
+			"hasClientMiddleware": false,
+			"hasDefaultExport": true,
+			"hasErrorBoundary": false,
+			"module": "/assets/finder-DeB-sE_j.js",
+			"imports": [
+				"/assets/jsx-runtime-OQpaS_Dv.js",
+				"/assets/chunk-BV7QT456-DRL8PfnM.js",
+				"/assets/useTranslation-D3cieaht.js",
+				"/assets/seo-BPqXQ8mV.js",
+				"/assets/SEO-DwlER4MH.js",
+				"/assets/CorpusTile-4Vgm0u2a.js",
+				"/assets/i18nInstance-DuAUdJZQ.js"
+			],
+			"css": [],
+			"clientActionModule": void 0,
+			"clientLoaderModule": void 0,
+			"clientMiddlewareModule": void 0,
+			"hydrateFallbackModule": void 0
+		},
 		"lang-discover-accords": {
 			"id": "lang-discover-accords",
 			"parentId": "lang",
@@ -10224,8 +10763,8 @@ var server_manifest_default = {
 			"hydrateFallbackModule": void 0
 		}
 	},
-	"url": "/assets/manifest-e4572cb3.js",
-	"version": "e4572cb3",
+	"url": "/assets/manifest-25a08541.js",
+	"version": "25a08541",
 	"sri": void 0
 };
 //#endregion
@@ -10378,6 +10917,14 @@ var routes = {
 		index: void 0,
 		caseSensitive: void 0,
 		module: compare_exports
+	},
+	"root-finder": {
+		id: "root-finder",
+		parentId: "routes/lang-layout",
+		path: "finder",
+		index: void 0,
+		caseSensitive: void 0,
+		module: finder_exports
 	},
 	"root-discover-accords": {
 		id: "root-discover-accords",
@@ -10554,6 +11101,14 @@ var routes = {
 		index: void 0,
 		caseSensitive: void 0,
 		module: compare_exports
+	},
+	"lang-finder": {
+		id: "lang-finder",
+		parentId: "lang",
+		path: "finder",
+		index: void 0,
+		caseSensitive: void 0,
+		module: finder_exports
 	},
 	"lang-discover-accords": {
 		id: "lang-discover-accords",
